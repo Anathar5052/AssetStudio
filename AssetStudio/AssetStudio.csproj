@@ -9,11 +9,12 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
 
+  <!-- Pour .NET 9 et autres frameworks modernes -->
   <ItemGroup Condition=" '$(TargetFramework)' != 'net472' ">
-    <PackageReference Include="K4os.Compression.LZ4" Version="1.2.16" />
     <PackageReference Include="K4os.Compression.LZ4" Version="1.3.2" />
   </ItemGroup>
 
+  <!-- Pour la compatibilité avec .NET Framework 4.7.2 -->
   <ItemGroup Condition=" '$(TargetFramework)' == 'net472' ">
     <PackageReference Include="System.Memory" Version="4.5.4" />
     <PackageReference Include="System.IO.Compression" Version="4.0.0" />
