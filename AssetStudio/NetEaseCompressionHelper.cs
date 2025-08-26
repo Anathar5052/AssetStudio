@@ -7,35 +7,40 @@ namespace AssetStudio
     {
         public static byte[] DecompressNetEaseVariant(byte[] compressed, int expectedDecompressedSize)
         {
-            try
-            {
-                byte[] output = new byte[expectedDecompressedSize];
+            // On alloue le buffer de sortie
+            byte[] output = new byte[expectedDecompressedSize];
 
-                // Décompression via LZ4 classique
-                int decoded = LZ4Codec.Decode(compressed, 0, compressed.Length, output, 0, expectedDecompressedSize);
+            // Tentative 1 : décompression directe
+            int decoded = TryDecode(compressed, 0, compressed.Length, output, expectedDecompressedSize);
+            if (decoded == expectedDecompressedSize)
+                return output;
+
+            // Tentative 2 : certains fichiers NetEase ont des en-têtes personnalisés
+            for (int skip = 1; skip <= 64 && skip < compressed.Length; skip++)
+            {
+                decoded = TryDecode(compressed, skip, compressed.Length - skip, output, expectedDecompressedSize);
                 if (decoded == expectedDecompressedSize)
                     return output;
+            }
 
-                // Si ça échoue, on tente de sauter des headers éventuels
-                for (int skip = 1; skip <= 64 && skip < compressed.Length; skip++)
-                {
-                    try
-                    {
-                        decoded = LZ4Codec.Decode(compressed, skip, compressed.Length - skip, output, 0, expectedDecompressedSize);
-                        if (decoded == expectedDecompressedSize)
-                            return output;
-                    }
-                    catch
-                    {
-                        // On continue d'essayer
-                    }
-                }
+            // Si aucune tentative ne marche, on signale une erreur
+            throw new InvalidOperationException(
+                $"Échec de la décompression NetEase : attendu {expectedDecompressedSize} octets mais obtenu {decoded}."
+            );
+        }
 
-                return null;
+        private static int TryDecode(byte[] compressed, int offset, int length, byte[] output, int expected)
+        {
+            try
+            {
+                return LZ4Codec.Decode(
+                    compressed, offset, length,
+                    output, 0, expected
+                );
             }
             catch
             {
-                return null;
+                return -1;
             }
         }
     }
