@@ -305,6 +305,23 @@ namespace AssetStudio
                         break;
                     }
                 default:
+                    case 5: // NetEase / One Piece Fighting Path custom compression
+{
+    // Lire les données compressées
+    byte[] compressedBytes = reader.ReadBytes((int)compressedSize);
+
+    // Essayer une décompression LZ4 classique
+    byte[] decompressedBytes = NetEaseCompressionHelper.DecompressNetEaseVariant(compressedBytes, (int)decompressedSize);
+
+    if (decompressedBytes == null || decompressedBytes.Length != (int)decompressedSize)
+    {
+        throw new IOException($"Echec de la décompression pour compression type 5 : taille obtenue {decompressedBytes?.Length ?? 0} au lieu de {decompressedSize}");
+    }
+
+    blocksStream.Write(decompressedBytes, 0, decompressedBytes.Length);
+    break;
+}
+
                     throw new IOException($"Unsupported compression type {compressionType}");
             }
             using (var blocksInfoReader = new EndianBinaryReader(blocksInfoUncompresseddStream))
