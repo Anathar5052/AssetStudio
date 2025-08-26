@@ -28,7 +28,8 @@ namespace AssetStudio
         Lzma,
         Lz4,
         Lz4HC,
-        Lzham
+        Lzham,
+        NetEase = 5 // <-- Ajout officiel pour One Piece Fighting Path
     }
 
     public class BundleFile
@@ -63,13 +64,12 @@ namespace AssetStudio
         public Header m_Header;
         public StorageBlock[] m_BlocksInfo;
         public Node[] m_DirectoryInfo;
-
         public StreamFile[] fileList;
 
         public static BundleFile Create(FileReader reader)
         {
-            return reader.Loader is {ReturnsBundleFile: true} 
-                ? reader.Loader.ProcessBundle(reader) 
+            return reader.Loader is { ReturnsBundleFile: true }
+                ? reader.Loader.ProcessBundle(reader)
                 : new BundleFile(reader);
         }
 
@@ -160,8 +160,6 @@ namespace AssetStudio
             var uncompressedSizeSum = m_BlocksInfo.Sum(x => x.uncompressedSize);
             if (uncompressedSizeSum >= int.MaxValue)
             {
-                /*var memoryMappedFile = MemoryMappedFile.CreateNew(null, uncompressedSizeSum);
-                assetsDataStream = memoryMappedFile.CreateViewStream();*/
                 blocksStream = new FileStream(path + ".temp", FileMode.Create, FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.DeleteOnClose);
             }
             else
@@ -216,8 +214,6 @@ namespace AssetStudio
                 file.fileName = Path.GetFileName(node.path);
                 if (node.size >= int.MaxValue)
                 {
-                    /*var memoryMappedFile = MemoryMappedFile.CreateNew(null, entryinfo_size);
-                    file.stream = memoryMappedFile.CreateViewStream();*/
                     var extractPath = path + "_unpacked" + Path.DirectorySeparatorChar;
                     Directory.CreateDirectory(extractPath);
                     file.stream = new FileStream(extractPath + file.fileName, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite);
@@ -251,7 +247,7 @@ namespace AssetStudio
             {
                 reader.AlignStream(16);
             }
-            else if (m_Header.version == 6) // Some recompiled Unity versions based on 2019.4.30 have the alignment set before version 7
+            else if (m_Header.version == 6)
             {
                 var temp = (stackalloc byte[(int)(16 - reader.Position % 16)]);
                 reader.CheckedRead(temp);
@@ -265,7 +261,7 @@ namespace AssetStudio
                 blocksInfoBytes = reader.ReadBytes((int)m_Header.compressedBlocksInfoSize);
                 reader.Position = position;
             }
-            else //0x40 BlocksAndDirectoryInfoCombined
+            else
             {
                 blocksInfoBytes = reader.ReadBytes((int)m_Header.compressedBlocksInfoSize);
             }
@@ -278,52 +274,33 @@ namespace AssetStudio
             switch (compressionType)
             {
                 case CompressionType.None:
-                    {
-                        blocksInfoUncompresseddStream = new MemoryStream(blocksInfoBytes);
-                        break;
-                    }
+                    blocksInfoUncompresseddStream = new MemoryStream(blocksInfoBytes);
+                    break;
+
                 case CompressionType.Lzma:
+                    blocksInfoUncompresseddStream = new MemoryStream((int)(uncompressedSize));
+                    using (var blocksInfoCompressedStream = new MemoryStream(blocksInfoBytes))
                     {
-                        blocksInfoUncompresseddStream = new MemoryStream((int)(uncompressedSize));
-                        using (var blocksInfoCompressedStream = new MemoryStream(blocksInfoBytes))
-                        {
-                            SevenZipHelper.StreamDecompress(blocksInfoCompressedStream, blocksInfoUncompresseddStream, m_Header.compressedBlocksInfoSize, m_Header.uncompressedBlocksInfoSize);
-                        }
-                        blocksInfoUncompresseddStream.Position = 0;
-                        break;
+                        SevenZipHelper.StreamDecompress(blocksInfoCompressedStream, blocksInfoUncompresseddStream, m_Header.compressedBlocksInfoSize, m_Header.uncompressedBlocksInfoSize);
                     }
+                    blocksInfoUncompresseddStream.Position = 0;
+                    break;
+
                 case CompressionType.Lz4:
                 case CompressionType.Lz4HC:
+                    var uncompressedBytes = new byte[uncompressedSize];
+                    var numWrite = LZ4Codec.Decode(blocksInfoBytes, uncompressedBytes);
+                    if (numWrite != uncompressedSize)
                     {
-                        var uncompressedBytes = new byte[uncompressedSize];
-                        var numWrite = LZ4Codec.Decode(blocksInfoBytes, uncompressedBytes);
-                        if (numWrite != uncompressedSize)
-                        {
-                            throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
-                        }
-                        blocksInfoUncompresseddStream = new MemoryStream(uncompressedBytes);
-                        break;
+                        throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
                     }
+                    blocksInfoUncompresseddStream = new MemoryStream(uncompressedBytes);
+                    break;
+
                 default:
-                case 5: // NetEase / One Piece Fighting Path custom compression
-{
-    // Lire les données compressées
-    byte[] compressedBytes = reader.ReadBytes((int)compressedSize);
-
-    // Essayer une décompression LZ4 classique
-    byte[] decompressedBytes = NetEaseCompressionHelper.DecompressNetEaseVariant(compressedBytes, (int)decompressedSize);
-
-    if (decompressedBytes == null || decompressedBytes.Length != (int)decompressedSize)
-    {
-        throw new IOException($"Echec de la décompression pour compression type 5 : taille obtenue {decompressedBytes?.Length ?? 0} au lieu de {decompressedSize}");
-    }
-
-    blocksStream.Write(decompressedBytes, 0, decompressedBytes.Length);
-    break;
-}
-
                     throw new IOException($"Unsupported compression type {compressionType}");
             }
+
             using (var blocksInfoReader = new EndianBinaryReader(blocksInfoUncompresseddStream))
             {
                 var uncompressedDataHash = blocksInfoReader.ReadBytes(16);
@@ -366,26 +343,24 @@ namespace AssetStudio
                 switch (compressionType)
                 {
                     case CompressionType.None:
-                        {
-                            reader.BaseStream.CopyTo(blocksStream, blockInfo.compressedSize);
-                            break;
-                        }
+                        reader.BaseStream.CopyTo(blocksStream, blockInfo.compressedSize);
+                        break;
+
                     case CompressionType.Lzma:
-                        {
-                            SevenZipHelper.StreamDecompress(reader.BaseStream, blocksStream, blockInfo.compressedSize, blockInfo.uncompressedSize);
-                            break;
-                        }
+                        SevenZipHelper.StreamDecompress(reader.BaseStream, blocksStream, blockInfo.compressedSize, blockInfo.uncompressedSize);
+                        break;
+
                     case CompressionType.Lz4:
                     case CompressionType.Lz4HC:
-                    {
+                        {
                             var compressedSize = (int)blockInfo.compressedSize;
                             var compressedBytes = BigArrayPool<byte>.Shared.Rent(compressedSize);
-                            
+
                             var uncompressedSize = (int)blockInfo.uncompressedSize;
                             var uncompressedBytes = BigArrayPool<byte>.Shared.Rent(uncompressedSize);
-                            
+
                             reader.CheckedRead(compressedBytes, 0, compressedSize);
-                            
+
                             var numWrite = LZ4Codec.Decode(compressedBytes, 0, compressedSize, uncompressedBytes, 0, uncompressedSize);
                             if (numWrite != uncompressedSize)
                             {
@@ -397,6 +372,29 @@ namespace AssetStudio
                             BigArrayPool<byte>.Shared.Return(uncompressedBytes);
                             break;
                         }
+
+                    case CompressionType.NetEase:
+                        {
+                            var compressedSize = (int)blockInfo.compressedSize;
+                            var compressedBytes = BigArrayPool<byte>.Shared.Rent(compressedSize);
+
+                            var uncompressedSize = (int)blockInfo.uncompressedSize;
+                            var uncompressedBytes = BigArrayPool<byte>.Shared.Rent(uncompressedSize);
+
+                            reader.CheckedRead(compressedBytes, 0, compressedSize);
+
+                            var numWrite = LZ4Codec.Decode(compressedBytes, 0, compressedSize, uncompressedBytes, 0, uncompressedSize);
+                            if (numWrite != uncompressedSize)
+                            {
+                                throw new IOException($"Erreur décompression NetEase : {numWrite} octets écrits au lieu de {uncompressedSize}");
+                            }
+
+                            blocksStream.Write(uncompressedBytes, 0, uncompressedSize);
+                            BigArrayPool<byte>.Shared.Return(compressedBytes);
+                            BigArrayPool<byte>.Shared.Return(uncompressedBytes);
+                            break;
+                        }
+
                     default:
                         throw new IOException($"Unsupported compression type {compressionType}");
                 }
