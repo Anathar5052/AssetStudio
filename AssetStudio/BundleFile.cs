@@ -305,7 +305,7 @@ namespace AssetStudio
                         break;
                     }
                 default:
-                    case 5: // NetEase / One Piece Fighting Path custom compression
+                case 5: // NetEase / One Piece Fighting Path custom compression
 {
     // Lire les données compressées
     byte[] compressedBytes = reader.ReadBytes((int)compressedSize);
