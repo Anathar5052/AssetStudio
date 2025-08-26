@@ -1,4 +1,5 @@
-﻿using K4os.Compression.LZ4;
+using K4os.Compression.LZ4;
+using K4os.Compression.LZ4.Streams;
 using System;
 using System.IO;
 using System.Linq;
@@ -29,7 +30,7 @@ namespace AssetStudio
         Lz4,
         Lz4HC,
         Lzham,
-        NetEase = 5 // <-- Ajout officiel pour One Piece Fighting Path
+        NetEase = 5 // Ajout pour OPFP
     }
 
     public class BundleFile
@@ -80,7 +81,7 @@ namespace AssetStudio
             switch (m_Header.signature)
             {
                 case "UnityArchive":
-                    break; //TODO
+                    break;
                 case "UnityWeb":
                 case "UnityRaw":
                     if (m_Header.version == 6)
@@ -178,11 +179,9 @@ namespace AssetStudio
                 if (isCompressed)
                 {
                     using (var memoryStream = new MemoryStream(uncompressedBytes))
+                    using (var decompressStream = SevenZipHelper.StreamDecompress(memoryStream))
                     {
-                        using (var decompressStream = SevenZipHelper.StreamDecompress(memoryStream))
-                        {
-                            uncompressedBytes = decompressStream.ToArray();
-                        }
+                        uncompressedBytes = decompressStream.ToArray();
                     }
                 }
                 blocksStream.Write(uncompressedBytes, 0, uncompressedBytes.Length);
@@ -297,6 +296,14 @@ namespace AssetStudio
                     blocksInfoUncompresseddStream = new MemoryStream(uncompressedBytes);
                     break;
 
+                case CompressionType.NetEase:
+                    // Utilisation du helper spécial NetEase
+                    var neteaseDecompressed = NetEaseCompressionHelper.DecompressNetEaseVariant(blocksInfoBytes, (int)uncompressedSize);
+                    if (neteaseDecompressed == null)
+                        throw new IOException("Échec de la décompression NetEase");
+                    blocksInfoUncompresseddStream = new MemoryStream(neteaseDecompressed);
+                    break;
+
                 default:
                     throw new IOException($"Unsupported compression type {compressionType}");
             }
@@ -376,22 +383,13 @@ namespace AssetStudio
                     case CompressionType.NetEase:
                         {
                             var compressedSize = (int)blockInfo.compressedSize;
-                            var compressedBytes = BigArrayPool<byte>.Shared.Rent(compressedSize);
+                            var compressedBytes = reader.ReadBytes(compressedSize);
 
-                            var uncompressedSize = (int)blockInfo.uncompressedSize;
-                            var uncompressedBytes = BigArrayPool<byte>.Shared.Rent(uncompressedSize);
+                            var neteaseDecompressed = NetEaseCompressionHelper.DecompressNetEaseVariant(compressedBytes, (int)blockInfo.uncompressedSize);
+                            if (neteaseDecompressed == null)
+                                throw new IOException("Échec de la décompression NetEase");
 
-                            reader.CheckedRead(compressedBytes, 0, compressedSize);
-
-                            var numWrite = LZ4Codec.Decode(compressedBytes, 0, compressedSize, uncompressedBytes, 0, uncompressedSize);
-                            if (numWrite != uncompressedSize)
-                            {
-                                throw new IOException($"Erreur décompression NetEase : {numWrite} octets écrits au lieu de {uncompressedSize}");
-                            }
-
-                            blocksStream.Write(uncompressedBytes, 0, uncompressedSize);
-                            BigArrayPool<byte>.Shared.Return(compressedBytes);
-                            BigArrayPool<byte>.Shared.Return(uncompressedBytes);
+                            blocksStream.Write(neteaseDecompressed, 0, neteaseDecompressed.Length);
                             break;
                         }
 
