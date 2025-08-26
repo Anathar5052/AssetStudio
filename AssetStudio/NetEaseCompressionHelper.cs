@@ -1,5 +1,6 @@
 using System;
-using K4os.Compression.LZ4;
+using System.IO;
+using K4os.Compression.LZ4.Streams;
 
 namespace AssetStudio
 {
@@ -7,40 +8,33 @@ namespace AssetStudio
     {
         public static byte[] DecompressNetEaseVariant(byte[] compressed, int expectedDecompressedSize)
         {
-            // On alloue le buffer de sortie
-            byte[] output = new byte[expectedDecompressedSize];
-
-            // Tentative 1 : décompression directe
-            int decoded = TryDecode(compressed, 0, compressed.Length, output, expectedDecompressedSize);
-            if (decoded == expectedDecompressedSize)
-                return output;
-
-            // Tentative 2 : certains fichiers NetEase ont des en-têtes personnalisés
-            for (int skip = 1; skip <= 64 && skip < compressed.Length; skip++)
-            {
-                decoded = TryDecode(compressed, skip, compressed.Length - skip, output, expectedDecompressedSize);
-                if (decoded == expectedDecompressedSize)
-                    return output;
-            }
-
-            // Si aucune tentative ne marche, on signale une erreur
-            throw new InvalidOperationException(
-                $"Échec de la décompression NetEase : attendu {expectedDecompressedSize} octets mais obtenu {decoded}."
-            );
-        }
-
-        private static int TryDecode(byte[] compressed, int offset, int length, byte[] output, int expected)
-        {
             try
             {
-                return LZ4Codec.Decode(
-                    compressed, offset, length,
-                    output, 0, expected
-                );
+                using (var input = new MemoryStream(compressed))
+                using (var lz4Stream = LZ4Stream.Decode(input))
+                using (var output = new MemoryStream())
+                {
+                    lz4Stream.CopyTo(output);
+
+                    byte[] result = output.ToArray();
+
+                    // Vérification : taille correcte ?
+                    if (result.Length != expectedDecompressedSize)
+                    {
+                        Console.WriteLine($"[NetEase] Avertissement : attendu {expectedDecompressedSize} octets, obtenu {result.Length} octets.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[NetEase] Décompression OK : {result.Length} octets.");
+                    }
+
+                    return result;
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                return -1;
+                Console.WriteLine($"[NetEase] Erreur de décompression : {ex.Message}");
+                return null;
             }
         }
     }
