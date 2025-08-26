@@ -1,6 +1,5 @@
 using System;
-using System.IO;
-using K4os.Compression.LZ4.Streams;
+using K4os.Compression.LZ4;
 
 namespace AssetStudio
 {
@@ -10,26 +9,30 @@ namespace AssetStudio
         {
             try
             {
-                using (var input = new MemoryStream(compressed))
-                using (var lz4Stream = LZ4Stream.Decode(input))
-                using (var output = new MemoryStream())
+                // On prépare le buffer de sortie
+                byte[] uncompressed = new byte[expectedDecompressedSize];
+
+                // Décompression via LZ4 classique (block)
+                int decoded = LZ4Codec.Decode(
+                    compressed,              // données compressées
+                    0,                       // offset dans compressed
+                    compressed.Length,       // taille totale compressée
+                    uncompressed,            // buffer de sortie
+                    0,                       // offset dans uncompressed
+                    expectedDecompressedSize // taille attendue décompressée
+                );
+
+                // Vérification de la taille décompressée
+                if (decoded != expectedDecompressedSize)
                 {
-                    lz4Stream.CopyTo(output);
-
-                    byte[] result = output.ToArray();
-
-                    // Vérification : taille correcte ?
-                    if (result.Length != expectedDecompressedSize)
-                    {
-                        Console.WriteLine($"[NetEase] Avertissement : attendu {expectedDecompressedSize} octets, obtenu {result.Length} octets.");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[NetEase] Décompression OK : {result.Length} octets.");
-                    }
-
-                    return result;
+                    Console.WriteLine($"[NetEase] Avertissement : attendu {expectedDecompressedSize} octets, obtenu {decoded} octets.");
                 }
+                else
+                {
+                    Console.WriteLine($"[NetEase] Décompression OK : {decoded} octets.");
+                }
+
+                return uncompressed;
             }
             catch (Exception ex)
             {
